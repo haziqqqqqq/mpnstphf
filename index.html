@@ -923,70 +923,78 @@
                 UI.downloadBtn.innerHTML = '<span>⏳</span> Processing 4K Graphic...';
                 UI.downloadBtn.disabled = true;
 
-                // Safari iOS Bug Fix: Force a microscopic reflow to ensure the browser has fully drawn the DOM
-                // before the html-to-image engine takes the snapshot.
-                sourceArea.style.opacity = '0.99';
-                setTimeout(() => {
-                    sourceArea.style.opacity = '1';
-                }, 10);
+                // --- THE MOBILE SQUISH FIX ---
+                // Save the current CSS preview scaling state
+                const originalTransform = sourceArea.style.transform;
                 
-                // CRITICAL MOBILE FIX: Use toBlob instead of toPng. 
-                // Phones crash when trying to process 15MB Base64 strings. Blobs use local memory safely.
-                htmlToImage.toBlob(sourceArea, {
-                    width: 1080, 
-                    height: targetHeight, 
-                    pixelRatio: 2, // Forces 4K Resolution
-                    backgroundColor: '#020617', 
-                    style: { 
-                        transform: 'none', // Strips away the CSS preview scaling
-                        transformOrigin: 'top left'
-                    },
-                    filter: (node) => {
-                        // CRITICAL FIX: Prevent empty or missing images from crashing the renderer
-                        if (node.tagName === 'IMG') {
-                            const src = node.getAttribute('src');
-                            if (!src || src === '' || src.endsWith('index.html')) {
-                                return false; 
+                // Force the live DOM to physically render at full 1080px scale.
+                // This forces mobile browsers to "un-squish" the flexbox layout before we take the picture.
+                sourceArea.style.transform = 'scale(1)';
+                
+                // Wait 150ms for the mobile processor to redraw the layout perfectly
+                setTimeout(() => {
+                    htmlToImage.toBlob(sourceArea, {
+                        width: 1080, 
+                        height: targetHeight, 
+                        pixelRatio: 2, 
+                        backgroundColor: '#020617', 
+                        style: { 
+                            transform: 'none', 
+                            transformOrigin: 'top left'
+                        },
+                        filter: (node) => {
+                            // CRITICAL FIX: Prevent empty or missing images from crashing the renderer
+                            if (node.tagName === 'IMG') {
+                                const src = node.getAttribute('src');
+                                if (!src || src === '' || src.endsWith('index.html')) {
+                                    return false; 
+                                }
                             }
+                            return true;
                         }
-                        return true;
-                    }
-                }).then(blob => {
-                    UI.downloadBtn.innerHTML = originalBtnText;
-                    UI.downloadBtn.disabled = false;
-                    
-                    const fileName = `MP-Fund_${UI.badgeSelect.value}_HighRes.png`;
-
-                    // MOBILE MAGIC: Try to use the native phone sharing sheet (Save to Photos, send to WhatsApp)
-                    if (navigator.share && /iPad|iPhone|iPod|Android/.test(navigator.userAgent)) {
-                        const file = new File([blob], fileName, { type: 'image/png' });
-                        navigator.share({
-                            files: [file],
-                            title: 'Fundraiser Graphic'
-                        }).catch(err => {
-                            console.log("User cancelled share", err);
-                        });
-                        showMessage(UI.notification);
-                    } else {
-                        // DESKTOP FALLBACK: Standard download link using memory-safe Object URLs
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.download = fileName;
-                        link.href = url;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                    }).then(blob => {
+                        // Instantly restore the small preview scaling on the screen
+                        sourceArea.style.transform = originalTransform;
                         
-                        // Clean up memory after 10 seconds
-                        setTimeout(() => URL.revokeObjectURL(url), 10000);
-                        showMessage(UI.notification);
-                    }
-                }).catch(err => {
-                    console.error("Error generating image: ", err);
-                    UI.downloadBtn.innerHTML = originalBtnText;
-                    UI.downloadBtn.disabled = false;
-                    showMessage(UI.errorNotification);
-                });
+                        UI.downloadBtn.innerHTML = originalBtnText;
+                        UI.downloadBtn.disabled = false;
+                        
+                        const fileName = `MP-Fund_${UI.badgeSelect.value}_HighRes.png`;
+
+                        // MOBILE MAGIC: Try to use the native phone sharing sheet (Save to Photos, send to WhatsApp)
+                        if (navigator.share && /iPad|iPhone|iPod|Android/.test(navigator.userAgent)) {
+                            const file = new File([blob], fileName, { type: 'image/png' });
+                            navigator.share({
+                                files: [file],
+                                title: 'Fundraiser Graphic'
+                            }).catch(err => {
+                                console.log("User cancelled share", err);
+                            });
+                            showMessage(UI.notification);
+                        } else {
+                            // DESKTOP FALLBACK: Standard download link using memory-safe Object URLs
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.download = fileName;
+                            link.href = url;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            // Clean up memory after 10 seconds
+                            setTimeout(() => URL.revokeObjectURL(url), 10000);
+                            showMessage(UI.notification);
+                        }
+                    }).catch(err => {
+                        console.error("Error generating image: ", err);
+                        // Make sure to restore the screen view even if the download fails!
+                        sourceArea.style.transform = originalTransform;
+                        
+                        UI.downloadBtn.innerHTML = originalBtnText;
+                        UI.downloadBtn.disabled = false;
+                        showMessage(UI.errorNotification);
+                    });
+                }, 150); // The 150ms delay is the secret to fixing the mobile layout bug
             });
             
             UI.generateCaptionBtn.addEventListener('click', async () => {
