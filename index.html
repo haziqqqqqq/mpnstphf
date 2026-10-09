@@ -26,17 +26,14 @@
         #post-capture-area {
             width: 1080px;  
             height: 1080px; 
-            transform: scale(0.35);
             transform-origin: top center;
-            transition: all 0.3s ease;
+            transition: transform 0.1s ease-out;
         }
         
-        @media (min-width: 640px) { #post-capture-area { transform: scale(0.5); } }
-        @media (min-width: 1024px) { #post-capture-area { transform: scale(0.7); } }
-        
-        .template-container { height: 420px; transition: all 0.3s ease; }
-        @media (min-width: 640px) { .template-container { height: 580px; } }
-        @media (min-width: 1024px) { .template-container { height: 800px; } }
+        .template-container { 
+            transition: height 0.1s ease-out; 
+            width: 100%;
+        }
 
         /* Custom scrollbar for control panel */
         ::-webkit-scrollbar { width: 8px; }
@@ -651,9 +648,17 @@
             // Format Sizer Logic (Square, Portrait, Story)
             const updateContainerHeight = () => {
                 const formatHeight = parseInt(UI.formatSelect.value) || 1080;
-                // Match the CSS media query breakpoints and scale values
-                const scale = window.innerWidth >= 1024 ? 0.7 : (window.innerWidth >= 640 ? 0.5 : 0.35);
-                document.querySelector('.template-container').style.height = `${formatHeight * scale}px`;
+                const container = document.querySelector('.template-container');
+                
+                // Dynamically calculate perfect scale for any screen size (mobile or desktop)
+                // Subtracting 32px to ensure there's a small margin on mobile
+                const availableWidth = container.clientWidth - 32; 
+                
+                // Set max scale to 0.7 for desktop, but scale down infinitely for phones
+                const scale = Math.min(availableWidth / 1080, 0.7);
+                
+                document.getElementById('post-capture-area').style.transform = `scale(${scale})`;
+                container.style.height = `${formatHeight * scale}px`;
             };
 
             // Keep it updated if the user resizes their browser window
@@ -925,8 +930,9 @@
                     sourceArea.style.opacity = '1';
                 }, 10);
                 
-                // Use htmlToImage natively with built-in scale correction and image filtering
-                htmlToImage.toPng(sourceArea, {
+                // CRITICAL MOBILE FIX: Use toBlob instead of toPng. 
+                // Phones crash when trying to process 15MB Base64 strings. Blobs use local memory safely.
+                htmlToImage.toBlob(sourceArea, {
                     width: 1080, 
                     height: targetHeight, 
                     pixelRatio: 2, // Forces 4K Resolution
@@ -940,22 +946,41 @@
                         if (node.tagName === 'IMG') {
                             const src = node.getAttribute('src');
                             if (!src || src === '' || src.endsWith('index.html')) {
-                                return false; // Exclude empty images from the capture entirely
+                                return false; 
                             }
                         }
                         return true;
                     }
-                }).then(dataUrl => {
+                }).then(blob => {
                     UI.downloadBtn.innerHTML = originalBtnText;
                     UI.downloadBtn.disabled = false;
                     
-                    const link = document.createElement('a');
-                    link.download = `MP-Fund_${UI.badgeSelect.value}_HighRes.png`;
-                    link.href = dataUrl;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    showMessage(UI.notification);
+                    const fileName = `MP-Fund_${UI.badgeSelect.value}_HighRes.png`;
+
+                    // MOBILE MAGIC: Try to use the native phone sharing sheet (Save to Photos, send to WhatsApp)
+                    if (navigator.share && /iPad|iPhone|iPod|Android/.test(navigator.userAgent)) {
+                        const file = new File([blob], fileName, { type: 'image/png' });
+                        navigator.share({
+                            files: [file],
+                            title: 'Fundraiser Graphic'
+                        }).catch(err => {
+                            console.log("User cancelled share", err);
+                        });
+                        showMessage(UI.notification);
+                    } else {
+                        // DESKTOP FALLBACK: Standard download link using memory-safe Object URLs
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.download = fileName;
+                        link.href = url;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        
+                        // Clean up memory after 10 seconds
+                        setTimeout(() => URL.revokeObjectURL(url), 10000);
+                        showMessage(UI.notification);
+                    }
                 }).catch(err => {
                     console.error("Error generating image: ", err);
                     UI.downloadBtn.innerHTML = originalBtnText;
