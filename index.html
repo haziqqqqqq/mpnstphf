@@ -24,7 +24,10 @@
         
         /* Scaled container for previewing the 1080x1080 square */
         #post-capture-area {
-            width: 1080px;  
+            width: 1080px !important;
+            min-width: 1080px !important;
+            max-width: 1080px !important;
+            flex-shrink: 0 !important; /* This stops mobile Flexbox from squishing it! */
             height: 1080px; 
             transform-origin: top center;
             transition: transform 0.1s ease-out;
